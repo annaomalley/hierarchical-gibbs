@@ -1,0 +1,269 @@
+---
+title: "STAT 433 Code"
+author: "Paul Zuo"
+date: "4/22/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Goal
+This markdown file is to outline the anlaysis procedures for the 433 final project.
+
+## Example 11.6: hierarchical normal model
+```{r}
+ngroups <- 4
+id <- rep(LETTERS[1:ngroups],c(4,6,6,8)) # gives vector of letters, based on # of letters in each group
+y <- c(62,60,63,59,63,67,71,64,65,66,
+     68,66,71,67,68,68,56,62,60,61,
+     63,64,63,59)  
+
+J <- length(unique(id)) # the number of groups
+n <- length(y) # total number of observations across groups
+
+set.seed(10)
+
+# take 10 random samples from each of the ngroups
+theta.f <- sapply(1:ngroups,function(x) sample(y[id==LETTERS[x]],1, replace=TRUE))
+theta.f
+# then get the average for each group
+mu.f <- mean(theta.f)
+
+# arriving at the posterior for tau hat -- EQN 11.17
+tau.hat.2 <- function(theta) {
+  mu <- mean(theta)
+  tau.2 <- (1/(J-1) ) * sum((theta - mu)^2)
+  return(tau.2)
+} 
+
+# getting tau from tau hat -- EQN 11.16
+s.tau.post <- function(theta) {
+  tau.2 <- tau.hat.2(theta) 
+  tau.cond <- (J - 1) * (tau.2)/rchisq(1,J-1) # https://stackoverflow.com/questions/20480091/samples-from-scaled-inverse-chisquare-distribution
+  return(tau.cond)
+}
+
+# getting an estimate for sigma hat^2 -- EQN 11.15
+f.sigma.hat.2 <- function(theta) {
+  sigma.hat.2 <- sapply(1:ngroups, function(x) (y[id==LETTERS[x]] - theta[x])^2)  
+  sigma.hat.2 <- (1/n) * sum(unlist(sigma.hat.2))
+  return(sigma.hat.2)
+}
+
+# getting posterior estimate for sigma^2 -- EQN 11.14
+s.sigma.post <- function(theta) {
+  sigma2.hat <- f.sigma.hat.2(theta) 
+  sigma2.post <- (n) * (sigma2.hat)/rchisq(1,n)
+  return(sigma2.post)
+}
+
+# getting estimate for mu hat -- EQN 11.13
+mu.hat <- function(theta) {
+  mean(theta)
+} 
+
+# getting estimate for mu -- EQN 11.12
+s.mu <- function(theta,tau2) {
+  mu.hat <- mu.hat(theta)
+  rnorm(1,mu.hat,sqrt(tau2/J))
+}
+
+# EQN 11.10
+theta.hat.j <- function(j,mu,sigma2,tau2) {
+  y.bar.j <- mean(y[id==LETTERS[j]])
+  n.j <- length(y[id==LETTERS[j]])
+  ((1/tau2) * mu + (n.j/sigma2) * y.bar.j)/((1/tau2) + (n.j/sigma2))
+} 
+
+# EQN 11.11
+V.theta.hat.j <- function(j,mu,sigma2,tau2) {
+  n.j <- length(y[id==LETTERS[j]])
+  1/((1/tau2) + (n.j/sigma2))
+} 
+
+# EQN 11.9
+s.theta <- function(mu,sigma2,tau2) {
+  theta <- NULL 
+  for (j in 1:J) {
+    t.hat <- theta.hat.j(j,mu,sigma2,tau2)   
+    v.t.hat <- V.theta.hat.j(j,mu,sigma2,tau2)
+    theta[j] <- rnorm(1,t.hat,sqrt(v.t.hat)) 
+  }
+  return(theta)
+}
+
+mcmc.gibbs <- function(chain) {
+  res1 <- as.list(NULL) 
+  sims <- 200
+  param <- 7
+  s.param <- matrix(NA, ncol = param, nrow = sims )
+  colnames(s.param)<-  c("theta1", "theta2", "theta3", 
+                         "theta4", "mu", "sigma2", "tau2")
+  s.param[1,1:4]<- theta.f
+  s.param[1,7]  <- s.tau.post(theta.f)
+  s.param[1,6]  <- s.sigma.post(theta.f)
+  s.param[1,5]  <- s.mu(theta.f,s.param[1,7])
+   
+  for (s in 2:sims) {
+    s.param[s,1:4]<- s.theta(s.param[s-1,5],s.param[s-1,6],s.param[s-1,7])
+    s.param[s,7]  <- s.tau.post(s.param[s,1:4])
+    s.param[s,6]  <- s.sigma.post(s.param[s,1:4])
+    s.param[s,5]  <- s.mu(s.param[s,1:4],s.param[s,7])
+  }
+  
+  return(s.param)
+}
+
+s.param <- lapply(1, function(x) mcmc.gibbs(x))
+s.param.1 <- s.param[[1]][1:200, ]
+
+#Transform the variance in to sd.
+s.param.1[,6:7] <- sqrt(s.param.1[,6:7] )
+
+# apply quartiles over the columns
+t(apply(s.param.1, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+
+```
+
+## Hierarchical model in Exercise 11.3
+```{r}
+ngroups <- 6
+id <- rep(LETTERS[1:ngroups],c(5,5,5,5,5,5)) # gives vector of letters, based on # of letters in each group
+y <- c(83, 92 ,92, 46, 67, 117, 109, 114, 104, 87, 101, 93, 92, 86, 67, 105, 119, 116, 102, 116, 79, 97, 103, 79, 92, 57, 92, 104, 77, 100)  
+
+J <- length(unique(id)) # the number of groups
+n <- length(y) # total number of observations across groups
+
+set.seed(10)
+
+# take 10 random samples from each of the ngroups
+theta.f <- sapply(1:ngroups,function(x) sample(y[id==LETTERS[x]],1, replace=TRUE))
+theta.f
+# then get the average for each group
+mu.f <- mean(theta.f)
+
+# arriving at the posterior for tau hat -- EQN 11.17
+tau.hat.2 <- function(theta) {
+  mu <- mean(theta)
+  tau.2 <- (1/(J-1) ) * sum((theta - mu)^2)
+  return(tau.2)
+} 
+
+# getting tau from tau hat -- EQN 11.16
+s.tau.post <- function(theta) {
+  tau.2 <- tau.hat.2(theta) 
+  tau.cond <- (J - 1) * (tau.2)/rchisq(1,J-1) # https://stackoverflow.com/questions/20480091/samples-from-scaled-inverse-chisquare-distribution
+  return(tau.cond)
+}
+
+# getting an estimate for sigma hat^2 -- EQN 11.15
+f.sigma.hat.2 <- function(theta) {
+  sigma.hat.2 <- sapply(1:ngroups, function(x) (y[id==LETTERS[x]] - theta[x])^2)  
+  sigma.hat.2 <- (1/n) * sum(unlist(sigma.hat.2))
+  return(sigma.hat.2)
+}
+
+# getting posterior estimate for sigma^2 -- EQN 11.14
+s.sigma.post <- function(theta) {
+  sigma2.hat <- f.sigma.hat.2(theta) 
+  sigma2.post <- (n) * (sigma2.hat)/rchisq(1,n)
+  return(sigma2.post)
+}
+
+# getting estimate for mu hat -- EQN 11.13
+mu.hat <- function(theta) {
+  mean(theta)
+} 
+
+# getting estimate for mu -- EQN 11.12
+s.mu <- function(theta,tau2) {
+  mu.hat <- mu.hat(theta)
+  rnorm(1,mu.hat,sqrt(tau2/J))
+}
+
+# EQN 11.10
+theta.hat.j <- function(j,mu,sigma2,tau2) {
+  y.bar.j <- mean(y[id==LETTERS[j]])
+  n.j <- length(y[id==LETTERS[j]])
+  ((1/tau2) * mu + (n.j/sigma2) * y.bar.j)/((1/tau2) + (n.j/sigma2))
+} 
+
+# EQN 11.11
+V.theta.hat.j <- function(j,mu,sigma2,tau2) {
+  n.j <- length(y[id==LETTERS[j]])
+  1/((1/tau2) + (n.j/sigma2))
+} 
+
+# EQN 11.9
+s.theta <- function(mu,sigma2,tau2) {
+  theta <- NULL 
+  for (j in 1:J) {
+    t.hat <- theta.hat.j(j,mu,sigma2,tau2)   
+    v.t.hat <- V.theta.hat.j(j,mu,sigma2,tau2)
+    theta[j] <- rnorm(1,t.hat,sqrt(v.t.hat)) 
+  }
+  return(theta)
+}
+
+mcmc.gibbs <- function(chain) {
+  res1 <- as.list(NULL) 
+  sims <- 200
+  param <- 9
+  s.param <- matrix(NA, ncol = param, nrow = sims)
+  colnames(s.param)<-  c("theta1", "theta2", "theta3", 
+                         "theta4", "theta5", "theta6", "mu", "sigma2", "tau2")
+  s.param[1,1:6]<- theta.f
+  s.param[1,9]  <- s.tau.post(theta.f)
+  s.param[1,8]  <- s.sigma.post(theta.f)
+  s.param[1,7]  <- s.mu(theta.f,s.param[1,9])
+   
+  for (s in 2:sims) {
+    s.param[s,1:6]<- s.theta(s.param[s-1,7],s.param[s-1,8],s.param[s-1,9])
+    s.param[s,9]  <- s.tau.post(s.param[s,1:6])
+    s.param[s,8]  <- s.sigma.post(s.param[s,1:6])
+    s.param[s,7]  <- s.mu(s.param[s,1:6],s.param[s,9])
+  }
+  
+  return(s.param)
+}
+
+s.param <- lapply(1, function(x) mcmc.gibbs(x))
+s.param.1 <- s.param[[1]][1:200, ]
+
+#Transform the variance in to sd.
+s.param.1[,8:9] <- sqrt(s.param.1[,8:9] )
+
+# apply quartiles over the columns
+t(apply(s.param.1, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+
+tmp_df <- as.data.frame(s.param.1)
+plot(density(tmp_df$theta6)) # posterior distribution for mean of 6th machine
+
+mn <- sample(tmp_df$theta6,1000, replace=TRUE)
+vr <- sample(tmp_df$sigma2,1000, replace=TRUE)
+
+smps_df <- cbind(mn, vr)
+
+## getting the posterior predictive distribution
+vals <- rep(0, 1000)
+for (num in 1:nrow(smps_df)) {
+  vals[num] <- rnorm(1, smps_df[num, 1], smps_df[num,2])
+}
+plot(density(vals))
+
+## getting what the seventh machine would be
+mn_overall <- sample(tmp_df$mu,1000, replace=TRUE)
+vr_overall <- sample(tmp_df$tau2,1000, replace=TRUE)
+
+overall_df <- cbind(mn_overall, vr_overall)
+
+vals_overall <- rep(0, 1000)
+for (num in 1:nrow(overall_df)) {
+  vals_overall[num] <- rnorm(1, overall_df[num, 1], overall_df[num,2])
+}
+plot(density(vals_overall))
+
+
+```
