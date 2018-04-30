@@ -26,15 +26,15 @@ n <- length(y) # total number of observations across groups
 set.seed(10)
 
 # take 10 random samples from each of the ngroups
-theta.f <- sapply(1:ngroups,function(x) sample(y[id==LETTERS[x]],1, replace=TRUE))
+theta.f <- sapply(1:ngroups,function(x) sample(y[id==LETTERS[x]],10, replace=TRUE))
 theta.f
 # then get the average for each group
-mu.f <- mean(theta.f)
+mu.f <-apply(theta.f, 1, mean)
 
 # arriving at the posterior for tau hat -- EQN 11.17
 tau.hat.2 <- function(theta) {
   mu <- mean(theta)
-  tau.2 <- (1/(J-1) ) * sum((theta - mu)^2)
+  tau.2 <- (1/(J-1)) * sum((theta - mu)^2)
   return(tau.2)
 } 
 
@@ -55,7 +55,7 @@ f.sigma.hat.2 <- function(theta) {
 # getting posterior estimate for sigma^2 -- EQN 11.14
 s.sigma.post <- function(theta) {
   sigma2.hat <- f.sigma.hat.2(theta) 
-  sigma2.post <- (n) * (sigma2.hat)/rchisq(1,n)
+  sigma2.post <- (n*sigma2.hat)/rchisq(1,n)
   return(sigma2.post)
 }
 
@@ -98,13 +98,13 @@ mcmc.gibbs <- function(chain) {
   res1 <- as.list(NULL) 
   sims <- 200
   param <- 7
-  s.param <- matrix(NA, ncol = param, nrow = sims )
+  s.param <- matrix(NA, ncol = param, nrow = sims)
   colnames(s.param)<-  c("theta1", "theta2", "theta3", 
                          "theta4", "mu", "sigma2", "tau2")
-  s.param[1,1:4]<- theta.f
-  s.param[1,7]  <- s.tau.post(theta.f)
-  s.param[1,6]  <- s.sigma.post(theta.f)
-  s.param[1,5]  <- s.mu(theta.f,s.param[1,7])
+  s.param[1,1:4]<- theta.f[chain,]
+  s.param[1,7]  <- s.tau.post(theta.f[chain,])
+  s.param[1,6]  <- s.sigma.post(theta.f[chain,])
+  s.param[1,5]  <- s.mu(theta.f[chain,],s.param[1,7])
    
   for (s in 2:sims) {
     s.param[s,1:4]<- s.theta(s.param[s-1,5],s.param[s-1,6],s.param[s-1,7])
@@ -116,19 +116,54 @@ mcmc.gibbs <- function(chain) {
   return(s.param)
 }
 
-s.param <- lapply(1, function(x) mcmc.gibbs(x))
+s.param <- lapply(1:10, function(x) mcmc.gibbs(x))
+
+sims <- array(NA, c(200, 10, J+3))
+
 s.param.1 <- s.param[[1]][1:200, ]
+s.param.2 <- s.param[[2]][1:200, ]
+s.param.3 <- s.param[[3]][1:200, ]
+s.param.4 <- s.param[[4]][1:200, ]
+s.param.5 <- s.param[[5]][1:200, ]
+s.param.6 <- s.param[[6]][1:200, ]
+s.param.7 <- s.param[[7]][1:200, ]
+s.param.8 <- s.param[[8]][1:200, ]
+s.param.9 <- s.param[[9]][1:200, ]
+s.param.10 <- s.param[[10]][1:200, ]
 
 #Transform the variance in to sd.
-s.param.1[,6:7] <- sqrt(s.param.1[,6:7] )
+s.param.1[,6:7] <- sqrt(s.param.1[,6:7])
+s.param.2[,6:7] <- sqrt(s.param.2[,6:7])
+s.param.3[,6:7] <- sqrt(s.param.3[,6:7])
+s.param.4[,6:7] <- sqrt(s.param.4[,6:7])
+s.param.5[,6:7] <- sqrt(s.param.5[,6:7])
+s.param.6[,6:7] <- sqrt(s.param.6[,6:7])
+s.param.7[,6:7] <- sqrt(s.param.7[,6:7])
+s.param.8[,6:7] <- sqrt(s.param.8[,6:7])
+s.param.9[,6:7] <- sqrt(s.param.9[,6:7])
+s.param.10[,6:7] <- sqrt(s.param.10[,6:7])
 
-# apply quartiles over the columns
-t(apply(s.param.1, 2, function(x) quantile(x, c(.025,.25,.5,.75,.975))))
+for (col in 1:200) {
+  sims[col,1,] <- s.param.1[col,]
+  sims[col,2,] <- s.param.2[col,]
+  sims[col,3,] <- s.param.3[col,]
+  sims[col,4,] <- s.param.4[col,]
+  sims[col,5,] <- s.param.5[col,]
+  sims[col,6,] <- s.param.6[col,]
+  sims[col,7,] <- s.param.7[col,]
+  sims[col,8,] <- s.param.8[col,]
+  sims[col,9,] <- s.param.9[col,]
+  sims[col,10,] <- s.param.10[col,]
+}
 
+# results - need to understand n_eff
+monitor(sims)
 ```
 
 ## Hierarchical model in Exercise 11.3
 ```{r}
+library("rstan")
+library(ggplot2)
 ngroups <- 6
 id <- rep(LETTERS[1:ngroups],c(5,5,5,5,5,5)) # gives vector of letters, based on # of letters in each group
 y <- c(83, 92 ,92, 46, 67, 117, 109, 114, 104, 87, 101, 93, 92, 86, 67, 105, 119, 116, 102, 116, 79, 97, 103, 79, 92, 57, 92, 104, 77, 100)  
@@ -207,6 +242,11 @@ s.theta <- function(mu,sigma2,tau2) {
   return(theta)
 }
 
+
+sims <- array(NA, c(200, 1, J+3))
+dimnames(sims) <- list (NULL, NULL,c(paste("theta[", 1:6, "]", sep=""), "mu", "sigma2", "tau"))
+sims
+
 mcmc.gibbs <- function(chain) {
   res1 <- as.list(NULL) 
   sims <- 200
@@ -214,16 +254,22 @@ mcmc.gibbs <- function(chain) {
   s.param <- matrix(NA, ncol = param, nrow = sims)
   colnames(s.param)<-  c("theta1", "theta2", "theta3", 
                          "theta4", "theta5", "theta6", "mu", "sigma2", "tau2")
-  s.param[1,1:6]<- theta.f
+  s.param[1,1:6]<- theta.f 
   s.param[1,9]  <- s.tau.post(theta.f)
   s.param[1,8]  <- s.sigma.post(theta.f)
   s.param[1,7]  <- s.mu(theta.f,s.param[1,9])
-   
+  
+  #tmp <- c(theta.f, s.param[[1,7]], s.param[[1,8]], s.param[[1,9]])
+  #print(tmp)
+  #sims[1,1,] <- tmp
+  
   for (s in 2:sims) {
     s.param[s,1:6]<- s.theta(s.param[s-1,7],s.param[s-1,8],s.param[s-1,9])
     s.param[s,9]  <- s.tau.post(s.param[s,1:6])
     s.param[s,8]  <- s.sigma.post(s.param[s,1:6])
     s.param[s,7]  <- s.mu(s.param[s,1:6],s.param[s,9])
+    #print(c(s.param[[s,1]], s.param[[s,2]], s.param[[s,3]], s.param[[s,4]], s.param[[s,5]], s.param[[s,6]], s.param[[s,7]], s.param[[s,8]], s.param[[s,9]]))
+    #sims[s,1,] <- c(s.param[[s,1]], s.param[[s,2]], s.param[[s,3]], s.param[[s,4]], s.param[[s,5]], s.param[[s,6]], s.param[[s,7]], s.param[[s,8]], s.param[[s,9]])
   }
   
   return(s.param)
@@ -231,6 +277,27 @@ mcmc.gibbs <- function(chain) {
 
 s.param <- lapply(1, function(x) mcmc.gibbs(x))
 s.param.1 <- s.param[[1]][1:200, ]
+
+for (col in 1:200) {
+  sims[col,1,] <- s.param.1[col,]
+}
+monitor(sims)
+
+# some visualizations !
+labs1 <- c('Samples', 'Steps of the sampler', '90% HPD')
+ind1 <- (1:200)*2-1
+p1 <- ggplot() +
+  geom_point(data = df100[ind1,],
+             aes(th1, th2, color ='1', frame = ind1, cumulative = T)) +
+  geom_segment(data = df100, aes(x = th1, xend = th1l, frame = 1:100, color = '2',
+                                 y = th2, yend = th2l, cumulative = T)) +
+  stat_ellipse(data = dft, aes(x = X1, y = X2, color = '3'), level = 0.9) +
+  coord_cartesian(xlim = c(-4, 4), ylim = c(-4, 4)) +
+  labs(x = 'theta1', y = 'theta2') +
+  scale_color_manual(values = c('blue', 'steelblue','red'), labels = labs1) +
+  guides(color = guide_legend(override.aes = list(
+    shape = c(16, NA, NA), linetype = c(0, 1, 1)))) +
+  theme(legend.position = 'bottom', legend.title = element_blank())
 
 #Transform the variance in to sd.
 s.param.1[,8:9] <- sqrt(s.param.1[,8:9] )
