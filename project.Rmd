@@ -14,76 +14,86 @@ This markdown file is to outline the anlaysis procedures for the 433 final proje
 
 ## Example 11.6: hierarchical normal model
 ```{r}
+# for using summary stats on MCMC parameters
+library("rstan") 
+# library for inverse chi square distribution
+library(LaplacesDemon) 
+library(dplyr)
+
 ngroups <- 4
-id <- rep(LETTERS[1:ngroups],c(4,6,6,8)) # gives vector of letters, based on # of letters in each group
+# gives vector of letters, based on # of letters in each group
+id <- rep(letters[1:ngroups],c(4,6,6,8)) 
+# the coagulation data
 y <- c(62,60,63,59,63,67,71,64,65,66,
      68,66,71,67,68,68,56,62,60,61,
      63,64,63,59)  
 
-J <- length(unique(id)) # the number of groups
-n <- length(y) # total number of observations across groups
+# the number of groups
+J <- length(unique(id)) 
+# total number of observations across groups
+n <- length(y) 
 
 set.seed(10)
 
 # take 10 random samples from each of the ngroups
-theta.f <- sapply(1:ngroups,function(x) sample(y[id==LETTERS[x]],10, replace=TRUE))
-theta.f
+theta.f <- sapply(1:ngroups,function(x) sample(y[id==letters[x]],10, replace=TRUE))
 # then get the average for each group
-mu.f <-apply(theta.f, 1, mean)
+mu.f <- apply(theta.f, 1, mean)
 
-# arriving at the posterior for tau hat -- EQN 11.17
+# arriving at the posterior for tau hat
 tau.hat.2 <- function(theta) {
   mu <- mean(theta)
-  tau.2 <- (1/(J-1)) * sum((theta - mu)^2)
+  tau.2 <- (1/(J-1)) * sum((theta-mu)^2)
   return(tau.2)
 } 
 
-# getting tau from tau hat -- EQN 11.16
+# getting tau from tau hat
 s.tau.post <- function(theta) {
   tau.2 <- tau.hat.2(theta) 
-  tau.cond <- (J - 1) * (tau.2)/rchisq(1,J-1) # https://stackoverflow.com/questions/20480091/samples-from-scaled-inverse-chisquare-distribution
+  tau.cond <- rinvchisq(1, J-1, scale=tau.2)
   return(tau.cond)
 }
 
-# getting an estimate for sigma hat^2 -- EQN 11.15
+# getting an estimate for sigma hat^2
 f.sigma.hat.2 <- function(theta) {
-  sigma.hat.2 <- sapply(1:ngroups, function(x) (y[id==LETTERS[x]] - theta[x])^2)  
+  sigma.hat.2 <- sapply(1:ngroups, function(x) (y[id==letters[x]] - theta[x])^2)  
   sigma.hat.2 <- (1/n) * sum(unlist(sigma.hat.2))
   return(sigma.hat.2)
 }
 
-# getting posterior estimate for sigma^2 -- EQN 11.14
+# getting posterior estimate for sigma^2
 s.sigma.post <- function(theta) {
   sigma2.hat <- f.sigma.hat.2(theta) 
-  sigma2.post <- (n*sigma2.hat)/rchisq(1,n)
+  sigma2.post <- rinvchisq(1, n, scale=sigma2.hat)
   return(sigma2.post)
 }
 
-# getting estimate for mu hat -- EQN 11.13
+# getting estimate for mu hat
 mu.hat <- function(theta) {
   mean(theta)
 } 
 
-# getting estimate for mu -- EQN 11.12
+# getting estimate for mu
 s.mu <- function(theta,tau2) {
   mu.hat <- mu.hat(theta)
   rnorm(1,mu.hat,sqrt(tau2/J))
 }
 
-# EQN 11.10
+# getting estimate for theta hat for group j
 theta.hat.j <- function(j,mu,sigma2,tau2) {
-  y.bar.j <- mean(y[id==LETTERS[j]])
-  n.j <- length(y[id==LETTERS[j]])
+  y.bar.j <- mean(y[id==letters[j]])
+  n.j <- length(y[id==letters[j]])
   ((1/tau2) * mu + (n.j/sigma2) * y.bar.j)/((1/tau2) + (n.j/sigma2))
 } 
 
-# EQN 11.11
+# getting estimate for variance of theta hat for group j
 V.theta.hat.j <- function(j,mu,sigma2,tau2) {
-  n.j <- length(y[id==LETTERS[j]])
+  n.j <- length(y[id==letters[j]])
   1/((1/tau2) + (n.j/sigma2))
 } 
 
-# EQN 11.9
+# sampling theta from the normal distribution with 
+# mean and varaince for theta hat j
 s.theta <- function(mu,sigma2,tau2) {
   theta <- NULL 
   for (j in 1:J) {
@@ -95,17 +105,23 @@ s.theta <- function(mu,sigma2,tau2) {
 }
 
 mcmc.gibbs <- function(chain) {
-  res1 <- as.list(NULL) 
   sims <- 200
   param <- 7
+  # create results matrix with a col for each parameter and
+  # a row for each simulation
   s.param <- matrix(NA, ncol = param, nrow = sims)
   colnames(s.param)<-  c("theta1", "theta2", "theta3", 
                          "theta4", "mu", "sigma2", "tau2")
+  
+  # initialization of parameters before simulation
   s.param[1,1:4]<- theta.f[chain,]
   s.param[1,7]  <- s.tau.post(theta.f[chain,])
   s.param[1,6]  <- s.sigma.post(theta.f[chain,])
   s.param[1,5]  <- s.mu(theta.f[chain,],s.param[1,7])
    
+  # each step of the simulation
+  # some varaibles depend on the earlier simulated estimates in the iteration
+  # for example, mu depends on the outcome of the posterior estimate of tau
   for (s in 2:sims) {
     s.param[s,1:4]<- s.theta(s.param[s-1,5],s.param[s-1,6],s.param[s-1,7])
     s.param[s,7]  <- s.tau.post(s.param[s,1:4])
@@ -116,10 +132,13 @@ mcmc.gibbs <- function(chain) {
   return(s.param)
 }
 
+# call the gibbs sampler on each of the 10 sequences
 s.param <- lapply(1:10, function(x) mcmc.gibbs(x))
 
+# simulations array
 sims <- array(NA, c(200, 10, J+3))
 
+# getting the parameters for each of the 10 sequences
 s.param.1 <- s.param[[1]][1:200, ]
 s.param.2 <- s.param[[2]][1:200, ]
 s.param.3 <- s.param[[3]][1:200, ]
@@ -131,7 +150,7 @@ s.param.8 <- s.param[[8]][1:200, ]
 s.param.9 <- s.param[[9]][1:200, ]
 s.param.10 <- s.param[[10]][1:200, ]
 
-#Transform the variance in to sd.
+#Transform the variance into standard deviation
 s.param.1[,6:7] <- sqrt(s.param.1[,6:7])
 s.param.2[,6:7] <- sqrt(s.param.2[,6:7])
 s.param.3[,6:7] <- sqrt(s.param.3[,6:7])
@@ -143,6 +162,8 @@ s.param.8[,6:7] <- sqrt(s.param.8[,6:7])
 s.param.9[,6:7] <- sqrt(s.param.9[,6:7])
 s.param.10[,6:7] <- sqrt(s.param.10[,6:7])
 
+# store the parameters for each of the 10 sequences into the 3D
+# sims matrix -- used for monitor summary stats call
 for (col in 1:200) {
   sims[col,1,] <- s.param.1[col,]
   sims[col,2,] <- s.param.2[col,]
@@ -156,16 +177,52 @@ for (col in 1:200) {
   sims[col,10,] <- s.param.10[col,]
 }
 
-# results - need to understand n_eff
+# summary statistics of the simulation
 monitor(sims)
+
+# convert to dataframes for gg plot
+chain1 <- as.data.frame(s.param.1)
+chain2 <- as.data.frame(s.param.2)
+chain3 <- as.data.frame(s.param.3)
+chain4 <- as.data.frame(s.param.4)
+chain5 <- as.data.frame(s.param.5)
+chain6 <- as.data.frame(s.param.6)
+chain7 <- as.data.frame(s.param.7)
+chain8 <- as.data.frame(s.param.8)
+chain9 <- as.data.frame(s.param.9)
+chain10 <- as.data.frame(s.param.10)
+
+# add a label for each one
+chain1$chain <- 1
+chain2$chain <- 2
+chain3$chain <- 3
+chain4$chain <- 4
+chain5$chain <- 5
+chain6$chain <- 6
+chain7$chain <- 7
+chain8$chain <- 8
+chain9$chain <- 9
+chain10$chain <- 10
+
+# merge them into one
+merged <- bind_rows(chain1,chain2,chain3, chain4, chain5, chain6, chain7, chain8, chain9, chain10)
+
+ggplot(data = merged) +
+  geom_line(aes(x = rep(1:200, 10), y = theta1, group=chain)) +
+  labs(title = 'Convergence For Theta1', x = '')
+
+chains22 <- ggplot(data = dfs1) +
+  geom_line(aes(x = rep(1:200, 10), y = th2, color = chain)) +
+  labs(x = 'iteration') +
+  scale_color_discrete(guide = FALSE)
+
 ```
 
 ## Hierarchical model in Exercise 11.3
 ```{r}
-library("rstan")
 library(ggplot2)
 ngroups <- 6
-id <- rep(LETTERS[1:ngroups],c(5,5,5,5,5,5)) # gives vector of letters, based on # of letters in each group
+id <- rep(letters[1:ngroups],c(5,5,5,5,5,5)) # gives vector of letters, based on # of letters in each group
 y <- c(83, 92 ,92, 46, 67, 117, 109, 114, 104, 87, 101, 93, 92, 86, 67, 105, 119, 116, 102, 116, 79, 97, 103, 79, 92, 57, 92, 104, 77, 100)  
 
 J <- length(unique(id)) # the number of groups
@@ -174,113 +231,76 @@ n <- length(y) # total number of observations across groups
 set.seed(10)
 
 # take 10 random samples from each of the ngroups
-theta.f <- sapply(1:ngroups,function(x) sample(y[id==LETTERS[x]],1, replace=TRUE))
-theta.f
+theta.f <- sapply(1:ngroups,function(x) sample(y[id==letters[x]],10, replace=TRUE))
 # then get the average for each group
-mu.f <- mean(theta.f)
+mu.f <- apply(theta.f, 1, mean)
 
-# arriving at the posterior for tau hat -- EQN 11.17
-tau.hat.2 <- function(theta) {
-  mu <- mean(theta)
-  tau.2 <- (1/(J-1) ) * sum((theta - mu)^2)
-  return(tau.2)
-} 
-
-# getting tau from tau hat -- EQN 11.16
-s.tau.post <- function(theta) {
-  tau.2 <- tau.hat.2(theta) 
-  tau.cond <- (J - 1) * (tau.2)/rchisq(1,J-1) # https://stackoverflow.com/questions/20480091/samples-from-scaled-inverse-chisquare-distribution
-  return(tau.cond)
-}
-
-# getting an estimate for sigma hat^2 -- EQN 11.15
-f.sigma.hat.2 <- function(theta) {
-  sigma.hat.2 <- sapply(1:ngroups, function(x) (y[id==LETTERS[x]] - theta[x])^2)  
-  sigma.hat.2 <- (1/n) * sum(unlist(sigma.hat.2))
-  return(sigma.hat.2)
-}
-
-# getting posterior estimate for sigma^2 -- EQN 11.14
-s.sigma.post <- function(theta) {
-  sigma2.hat <- f.sigma.hat.2(theta) 
-  sigma2.post <- (n) * (sigma2.hat)/rchisq(1,n)
-  return(sigma2.post)
-}
-
-# getting estimate for mu hat -- EQN 11.13
-mu.hat <- function(theta) {
-  mean(theta)
-} 
-
-# getting estimate for mu -- EQN 11.12
-s.mu <- function(theta,tau2) {
-  mu.hat <- mu.hat(theta)
-  rnorm(1,mu.hat,sqrt(tau2/J))
-}
-
-# EQN 11.10
-theta.hat.j <- function(j,mu,sigma2,tau2) {
-  y.bar.j <- mean(y[id==LETTERS[j]])
-  n.j <- length(y[id==LETTERS[j]])
-  ((1/tau2) * mu + (n.j/sigma2) * y.bar.j)/((1/tau2) + (n.j/sigma2))
-} 
-
-# EQN 11.11
-V.theta.hat.j <- function(j,mu,sigma2,tau2) {
-  n.j <- length(y[id==LETTERS[j]])
-  1/((1/tau2) + (n.j/sigma2))
-} 
-
-# EQN 11.9
-s.theta <- function(mu,sigma2,tau2) {
-  theta <- NULL 
-  for (j in 1:J) {
-    t.hat <- theta.hat.j(j,mu,sigma2,tau2)   
-    v.t.hat <- V.theta.hat.j(j,mu,sigma2,tau2)
-    theta[j] <- rnorm(1,t.hat,sqrt(v.t.hat)) 
-  }
-  return(theta)
-}
-
-
-sims <- array(NA, c(200, 1, J+3))
-dimnames(sims) <- list (NULL, NULL,c(paste("theta[", 1:6, "]", sep=""), "mu", "sigma2", "tau"))
-sims
+sims <- array(NA, c(200, 10, J+3))
+dimnames(sims) <- list(NULL, NULL,c(paste("theta[", 1:6, "]", sep=""), "mu", "sigma2", "tau"))
 
 mcmc.gibbs <- function(chain) {
-  res1 <- as.list(NULL) 
   sims <- 200
   param <- 9
   s.param <- matrix(NA, ncol = param, nrow = sims)
   colnames(s.param)<-  c("theta1", "theta2", "theta3", 
                          "theta4", "theta5", "theta6", "mu", "sigma2", "tau2")
-  s.param[1,1:6]<- theta.f 
-  s.param[1,9]  <- s.tau.post(theta.f)
-  s.param[1,8]  <- s.sigma.post(theta.f)
-  s.param[1,7]  <- s.mu(theta.f,s.param[1,9])
-  
-  #tmp <- c(theta.f, s.param[[1,7]], s.param[[1,8]], s.param[[1,9]])
-  #print(tmp)
-  #sims[1,1,] <- tmp
+  s.param[1,1:6]<- theta.f[chain,] 
+  s.param[1,9]  <- s.tau.post(theta.f[chain,])
+  s.param[1,8]  <- s.sigma.post(theta.f[chain,])
+  s.param[1,7]  <- s.mu(theta.f[chain,],s.param[1,9])
   
   for (s in 2:sims) {
     s.param[s,1:6]<- s.theta(s.param[s-1,7],s.param[s-1,8],s.param[s-1,9])
     s.param[s,9]  <- s.tau.post(s.param[s,1:6])
     s.param[s,8]  <- s.sigma.post(s.param[s,1:6])
     s.param[s,7]  <- s.mu(s.param[s,1:6],s.param[s,9])
-    #print(c(s.param[[s,1]], s.param[[s,2]], s.param[[s,3]], s.param[[s,4]], s.param[[s,5]], s.param[[s,6]], s.param[[s,7]], s.param[[s,8]], s.param[[s,9]]))
-    #sims[s,1,] <- c(s.param[[s,1]], s.param[[s,2]], s.param[[s,3]], s.param[[s,4]], s.param[[s,5]], s.param[[s,6]], s.param[[s,7]], s.param[[s,8]], s.param[[s,9]])
   }
   
   return(s.param)
 }
 
-s.param <- lapply(1, function(x) mcmc.gibbs(x))
-s.param.1 <- s.param[[1]][1:200, ]
+s.param <- lapply(1:5, function(x) mcmc.gibbs(x))
 
+# getting the parameters for each of the 10 sequences
+s.param.1 <- s.param[[1]][1:200, ]
+s.param.2 <- s.param[[2]][1:200, ]
+s.param.3 <- s.param[[3]][1:200, ]
+s.param.4 <- s.param[[4]][1:200, ]
+s.param.5 <- s.param[[5]][1:200, ]
+s.param.6 <- s.param[[6]][1:200, ]
+s.param.7 <- s.param[[7]][1:200, ]
+s.param.8 <- s.param[[8]][1:200, ]
+s.param.9 <- s.param[[9]][1:200, ]
+s.param.10 <- s.param[[10]][1:200, ]
+
+#Transform the variance into standard deviation
+s.param.1[,8:9] <- sqrt(s.param.1[,8:9])
+s.param.2[,8:9] <- sqrt(s.param.2[,8:9])
+s.param.3[,8:9] <- sqrt(s.param.3[,8:9])
+s.param.4[,8:9] <- sqrt(s.param.4[,8:9])
+s.param.5[,8:9] <- sqrt(s.param.5[,8:9])
+s.param.6[,8:9] <- sqrt(s.param.6[,8:9])
+s.param.7[,8:9] <- sqrt(s.param.7[,8:9])
+s.param.8[,8:9] <- sqrt(s.param.8[,8:9])
+s.param.9[,8:9] <- sqrt(s.param.9[,8:9])
+s.param.10[,8:9] <- sqrt(s.param.10[,8:9])
+
+# store the parameters for each of the 10 sequences into the 3D
+# sims matrix -- used for monitor summary stats call
 for (col in 1:200) {
   sims[col,1,] <- s.param.1[col,]
+  sims[col,2,] <- s.param.2[col,]
+  sims[col,3,] <- s.param.3[col,]
+  sims[col,4,] <- s.param.4[col,]
+  sims[col,5,] <- s.param.5[col,]
+  sims[col,6,] <- s.param.6[col,]
+  sims[col,7,] <- s.param.7[col,]
+  sims[col,8,] <- s.param.8[col,]
+  sims[col,9,] <- s.param.9[col,]
+  sims[col,10,] <- s.param.10[col,]
 }
+
+sims
 monitor(sims)
 
 # some visualizations !
